@@ -1,6 +1,11 @@
 const User = require("../models/User");
 const { BadRequestError, UnauthenticatedError } = require("../errors");
-const { attachCookiesToResponse, createTokenUser } = require("../utils");
+const {
+  attachCookiesToResponse,
+  createTokenUser,
+  sendVerificationEmail,
+} = require("../utils");
+const crypto = require("crypto");
 
 const register = async (req, res) => {
   const { email, name, password } = req.body;
@@ -9,10 +14,20 @@ const register = async (req, res) => {
   if (userExists) {
     throw new BadRequestError("Email already exists.");
   }
-  const user = await User.create({ email, password, name });
-  const tokenUser = createTokenUser(user);
-  attachCookiesToResponse({ res, user: tokenUser });
-  res.status(201).json({ user: tokenUser });
+  const verificationToken = crypto.randomBytes(40).toString("hex");
+  const user = await User.create({ email, password, name, verificationToken });
+
+  const origin = "http://localhost:3000";
+  await sendVerificationEmail({
+    name: user.name,
+    email: user.email,
+    verificationToken: user.verificationToken,
+    origin,
+  });
+
+  res.status(200).json({
+    msg: "Success! Please check your email to verify account",
+  });
 };
 
 const login = async (req, res) => {
@@ -29,6 +44,9 @@ const login = async (req, res) => {
   if (!isPasswordCorrect) {
     throw new UnauthenticatedError("Invalid credentials");
   }
+  if (!user.isVerified) {
+    throw new UnauthenticatedError("Kindly verify your email");
+  }
   const tokenUser = createTokenUser(user);
   attachCookiesToResponse({ res, user: tokenUser });
   res.status(200).json({ user: tokenUser });
@@ -42,4 +60,23 @@ const logout = async (req, res) => {
   res.status(200).json({});
 };
 
-module.exports = { register, login, logout };
+const verifyEmail = async (req, res) => {
+  const { email, verificationToken } = req.body;
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new UnauthenticatedError("Verification failed");
+  }
+  if (user.isVerified) {
+    throw new BadRequestError("Email already verified");
+  }
+  if (user.verificationToken !== verificationToken) {
+    throw new UnauthenticatedError("Verification failed");
+  }
+  user.isVerified = true;
+  user.verified = Date.now();
+  user.verificationToken = "";
+  await user.save();
+  res.status(200).json({ msg: "Email Verified" });
+};
+
+module.exports = { register, login, logout, verifyEmail };
