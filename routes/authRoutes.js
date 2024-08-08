@@ -6,9 +6,10 @@ const {
 } = require("../controllers/authController");
 
 const express = require("express");
+const { authenticateUser } = require("../middleware/authentication");
 const router = express.Router();
 
-router.get("/logout", logout);
+router.delete("/logout", authenticateUser, logout);
 router.post("/login", login);
 router.post("/register", register);
 router.post("/verify-email", verifyEmail);

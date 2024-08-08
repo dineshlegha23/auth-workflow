@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const Token = require("../models/Token");
 const { BadRequestError, UnauthenticatedError } = require("../errors");
 const {
   attachCookiesToResponse,
@@ -48,16 +49,43 @@ const login = async (req, res) => {
     throw new UnauthenticatedError("Kindly verify your email");
   }
   const tokenUser = createTokenUser(user);
-  attachCookiesToResponse({ res, user: tokenUser });
+
+  let refreshToken = "";
+
+  const existingToken = await Token.findOne({ user: user._id });
+  if (existingToken) {
+    const { isValid } = existingToken;
+    if (!isValid) {
+      throw new UnauthenticatedError("Invalid Credentials");
+    }
+    refreshToken = existingToken.refreshToken;
+    attachCookiesToResponse({ res, user: tokenUser, refreshToken });
+    res.status(200).json({ user: tokenUser });
+    return;
+  }
+
+  refreshToken = crypto.randomBytes(40).toString("hex");
+  const userAgent = req.headers["user-agent"];
+  const ip = req.ip;
+  const userToken = { refreshToken, ip, userAgent, user: user._id };
+
+  await Token.create(userToken);
+  attachCookiesToResponse({ res, user: tokenUser, refreshToken });
   res.status(200).json({ user: tokenUser });
 };
 
 const logout = async (req, res) => {
-  res.cookie("token", "", {
+  await Token.findOneAndDelete({ user: req.user.userId });
+
+  res.cookie("accessToken", "logout", {
     httpOnly: true,
     expires: new Date(Date.now()),
   });
-  res.status(200).json({});
+  res.cookie("refreshToken", "logout", {
+    httpOnly: true,
+    expires: new Date(Date.now()),
+  });
+  res.status(200).json({ msg: "user logged out!" });
 };
 
 const verifyEmail = async (req, res) => {
